@@ -148,7 +148,7 @@ pipeline {
         }
     }
 
-    post {
+  post {
         always {
             emailext(
                 subject: "Build ${currentBuild.result}: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
@@ -159,8 +159,7 @@ pipeline {
                     <p>URL: <a href="${env.BUILD_URL}">${env.BUILD_URL}</a></p>
                 """,
                 to: 'sofianezineddine77@gmail.com',
-                mimeType: 'text/html',
-                credentialsId: 'mail-cred'
+                mimeType: 'text/html'
             )
         }
     }
