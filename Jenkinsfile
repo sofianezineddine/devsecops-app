@@ -64,16 +64,29 @@ pipeline {
             }
         }
 
-        stage('Publish to Nexus') {
-            steps {
-                withMaven(
-                    globalMavenSettingsConfig: 'global-settings',
-                    jdk: 'Java 21',
-                    maven: 'Maven 3.8.1') {
-                    sh 'mvn deploy -DskipTests'
-                }
-            }
-        }
+stage('Publish to Nexus') {
+    steps {
+        sh '''
+            cat > /tmp/nexus-settings.xml << EOF
+<settings>
+  <servers>
+    <server>
+      <id>nexus-releases</id>
+      <username>admin</username>
+      <password>Gaj04353@</password>
+    </server>
+    <server>
+      <id>nexus-snapshots</id>
+      <username>admin</username>
+      <password>Gaj04353@</password>
+    </server>
+  </servers>
+</settings>
+EOF
+            mvn deploy -DskipTests -s /tmp/nexus-settings.xml
+        '''
+    }
+}
 
         stage('Build & Push Docker Image') {
             steps {
