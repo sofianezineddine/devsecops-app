@@ -39,19 +39,16 @@ pipeline {
 
         stage('SonarQube Analysis') {
             steps {
-                withCredentials([string(
-                    credentialsId: 'sonar-token',
-                    variable: 'SONAR_TOKEN')]) {
-                    withSonarQubeEnv('sonar') {
-                        sh """
-                            sonar-scanner \
-                              -Dsonar.projectKey=my-app \
-                              -Dsonar.sources=src/main/java \
-                              -Dsonar.tests=src/test/java \
-                              -Dsonar.java.binaries=target/classes \
-                              -Dsonar.login=\$SONAR_TOKEN
-                        """
-                    }
+                // withSonarQubeEnv already injects the token
+                // no need for extra withCredentials wrapper
+                withSonarQubeEnv('sonar') {
+                    sh """
+                        sonar-scanner \
+                          -Dsonar.projectKey=my-app \
+                          -Dsonar.sources=src/main/java \
+                          -Dsonar.tests=src/test/java \
+                          -Dsonar.java.binaries=target/classes
+                    """
                 }
             }
         }
@@ -64,43 +61,43 @@ pipeline {
             }
         }
 
-stage('Publish to Nexus') {
-    steps {
-        sh '''
-            cat > /tmp/nexus-settings.xml << EOF
+        stage('Publish to Nexus') {
+            steps {
+                withCredentials([usernamePassword(
+                    credentialsId: 'nexus-cred',
+                    usernameVariable: 'NEXUS_USER',
+                    passwordVariable: 'NEXUS_PASS')]) {
+                    sh '''
+                        cat > /tmp/nexus-settings.xml << EOF
 <settings>
   <servers>
     <server>
       <id>nexus-releases</id>
-      <username>admin</username>
-      <password>Gaj04353@</password>
+      <username>${NEXUS_USER}</username>
+      <password>${NEXUS_PASS}</password>
     </server>
     <server>
       <id>nexus-snapshots</id>
-      <username>admin</username>
-      <password>Gaj04353@</password>
+      <username>${NEXUS_USER}</username>
+      <password>${NEXUS_PASS}</password>
     </server>
   </servers>
 </settings>
 EOF
-            mvn deploy -DskipTests -s /tmp/nexus-settings.xml
-        '''
-    }
-}
+                        mvn deploy -DskipTests -s /tmp/nexus-settings.xml
+                    '''
+                }
+            }
+        }
 
         stage('Build & Push Docker Image') {
             steps {
-                withCredentials([usernamePassword(
-                    credentialsId: 'docker-cred',
-                    usernameVariable: 'DOCKER_USER',
-                    passwordVariable: 'DOCKER_PASS')]) {
-                    script {
-                        docker.withRegistry('', 'docker-cred') {
-                            def img = docker.build(
-                                "${DOCKER_USER}/my-app:${BUILD_NUMBER}")
-                            img.push()
-                            img.push('latest')
-                        }
+                script {
+                    // docker.withRegistry handles login/logout cleanly
+                    docker.withRegistry('https://index.docker.io/v1/', 'docker-cred') {
+                        def img = docker.build("sofiane235/my-app:${BUILD_NUMBER}")
+                        img.push()
+                        img.push('latest')
                     }
                 }
             }
@@ -108,19 +105,14 @@ EOF
 
         stage('Trivy Image Scan') {
             steps {
-                withCredentials([usernamePassword(
-                    credentialsId: 'docker-cred',
-                    usernameVariable: 'DOCKER_USER',
-                    passwordVariable: 'IGNORED')]) {
-                    sh """
-                        trivy image \
-                          --format table \
-                          -o trivy-report.html \
-                          --timeout 30m \
-                          --exit-code 0 \
-                          "${DOCKER_USER}/my-app:${BUILD_NUMBER}"
-                    """
-                }
+                sh """
+                    trivy image \
+                      --format table \
+                      -o trivy-report.html \
+                      --timeout 30m \
+                      --exit-code 0 \
+                      sofiane235/my-app:${BUILD_NUMBER}
+                """
                 archiveArtifacts artifacts: 'trivy-report.html',
                                  fingerprint: true
             }
@@ -128,16 +120,12 @@ EOF
 
         stage('Render K8s Manifest') {
             steps {
-                withCredentials([usernamePassword(
-                    credentialsId: 'docker-cred',
-                    usernameVariable: 'DOCKER_USER',
-                    passwordVariable: 'IGNORED')]) {
-                    sh '''
-                        export IMG_TAG="$DOCKER_USER/my-app:${BUILD_NUMBER}"
-                        envsubst < /root/k8s-manifest/deployment.yaml \
-                                 > rendered-deployment.yaml
-                    '''
-                }
+                sh """
+                    export IMG_TAG="sofiane235/my-app:${BUILD_NUMBER}"
+                    envsubst < /root/k8s-manifest/deployment.yaml \
+                             > rendered-deployment.yaml
+                    cat rendered-deployment.yaml
+                """
                 archiveArtifacts artifacts: 'rendered-deployment.yaml',
                                  fingerprint: true
             }
@@ -161,7 +149,7 @@ EOF
         }
     }
 
-  post {
+    post {
         always {
             emailext(
                 subject: "Build ${currentBuild.result}: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
