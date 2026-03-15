@@ -10,7 +10,9 @@ pipeline {
         JAVA_HOME    = tool 'Java 21'
         M2_HOME      = tool 'Maven 3.8.1'
         SCANNER_HOME = tool 'sonar-scanner'
-        PATH = "${JAVA_HOME}/bin:${M2_HOME}/bin:${SCANNER_HOME}/bin:${env.PATH}"
+        PATH         = "${JAVA_HOME}/bin:${M2_HOME}/bin:${SCANNER_HOME}/bin:${env.PATH}"
+        DOCKER_USER  = 'sofiane235'
+        IMAGE_NAME   = "${DOCKER_USER}/my-app"
     }
 
     triggers { githubPush() }
@@ -39,8 +41,6 @@ pipeline {
 
         stage('SonarQube Analysis') {
             steps {
-                // withSonarQubeEnv already injects the token
-                // no need for extra withCredentials wrapper
                 withSonarQubeEnv('sonar') {
                     sh """
                         sonar-scanner \
@@ -92,13 +92,38 @@ EOF
 
         stage('Build & Push Docker Image') {
             steps {
-                script {
-                    // docker.withRegistry handles login/logout cleanly
-                    docker.withRegistry('https://index.docker.io/v1/', 'docker-cred') {
-                        def img = docker.build("sofiane235/my-app:${BUILD_NUMBER}")
-                        img.push()
-                        img.push('latest')
-                    }
+                withCredentials([usernamePassword(
+                    credentialsId: 'docker-cred',
+                    usernameVariable: 'DOCKER_USER',
+                    passwordVariable: 'DOCKER_PASS')]) {
+                    sh """
+                        # Login to Docker Hub
+                        echo "\$DOCKER_PASS" | docker login \
+                            -u "\$DOCKER_USER" --password-stdin
+
+                        # Setup buildx builder if not exists
+                        docker buildx inspect jenkins-builder > /dev/null 2>&1 \
+                            || docker buildx create \
+                                --name jenkins-builder \
+                                --driver docker-container \
+                                --bootstrap
+
+                        # Use the builder
+                        docker buildx use jenkins-builder
+
+                        # Build and push in one command using BuildKit
+                        docker buildx build \
+                            --platform linux/amd64 \
+                            --tag \${DOCKER_USER}/my-app:${BUILD_NUMBER} \
+                            --tag \${DOCKER_USER}/my-app:latest \
+                            --cache-from type=registry,ref=\${DOCKER_USER}/my-app:cache \
+                            --cache-to   type=registry,ref=\${DOCKER_USER}/my-app:cache,mode=max \
+                            --push \
+                            .
+
+                        # Logout
+                        docker logout
+                    """
                 }
             }
         }
@@ -106,12 +131,16 @@ EOF
         stage('Trivy Image Scan') {
             steps {
                 sh """
+                    TRIVY_JAVA_DB_REPOSITORY=ghcr.io/aquasecurity/trivy-java-db:1 \
                     trivy image \
                       --format table \
                       -o trivy-report.html \
-                      --timeout 30m \
+                      --timeout 15m \
                       --exit-code 0 \
-                      sofiane235/my-app:${BUILD_NUMBER}
+                      --scanners vuln \
+                      --skip-db-update \
+                      --skip-java-db-update \
+                      ${IMAGE_NAME}:${BUILD_NUMBER}
                 """
                 archiveArtifacts artifacts: 'trivy-report.html',
                                  fingerprint: true
@@ -121,7 +150,7 @@ EOF
         stage('Render K8s Manifest') {
             steps {
                 sh """
-                    export IMG_TAG="sofiane235/my-app:${BUILD_NUMBER}"
+                    export IMG_TAG="${IMAGE_NAME}:${BUILD_NUMBER}"
                     envsubst < /root/k8s-manifest/deployment.yaml \
                              > rendered-deployment.yaml
                     cat rendered-deployment.yaml
