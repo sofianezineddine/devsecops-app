@@ -129,23 +129,33 @@ EOF
         }
 
         stage('Trivy Image Scan') {
-            steps {
-                sh """
-                    TRIVY_JAVA_DB_REPOSITORY=ghcr.io/aquasecurity/trivy-java-db:1 \
-                    trivy image \
-                      --format table \
-                      -o trivy-report.html \
-                      --timeout 15m \
-                      --exit-code 0 \
-                      --scanners vuln \
-                      --skip-db-update \
-                      --skip-java-db-update \
-                      ${IMAGE_NAME}:${BUILD_NUMBER}
-                """
-                archiveArtifacts artifacts: 'trivy-report.html',
-                                 fingerprint: true
-            }
-        }
+    steps {
+        sh """
+            # Download Java DB only if not cached yet
+            if [ ! -d "\$HOME/.cache/trivy/java-db" ]; then
+                echo "Java DB not found, downloading..."
+                TRIVY_JAVA_DB_REPOSITORY=ghcr.io/aquasecurity/trivy-java-db:1 \
+                trivy image --download-java-db-only
+            else
+                echo "Java DB already cached, skipping download."
+            fi
+
+            # Run the scan
+            TRIVY_JAVA_DB_REPOSITORY=ghcr.io/aquasecurity/trivy-java-db:1 \
+            trivy image \
+              --format table \
+              -o trivy-report.html \
+              --timeout 15m \
+              --exit-code 0 \
+              --scanners vuln \
+              --skip-db-update \
+              --skip-java-db-update \
+              ${IMAGE_NAME}:${BUILD_NUMBER}
+        """
+        archiveArtifacts artifacts: 'trivy-report.html',
+                         fingerprint: true
+    }
+}
 
         stage('Render K8s Manifest') {
             steps {
