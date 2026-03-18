@@ -11,7 +11,7 @@ public class App {
         HttpServer server = HttpServer.create(
             new InetSocketAddress(port), 0);
         server.createContext("/", exchange -> {
-            String response = "Hello, DevSecOps Project From Sofiane Zine-eddine! & Mohammed Amine !";
+            String response = "Hello, DevSecOps Project From Sofiane Zine-eddine!";
             exchange.sendResponseHeaders(200, response.length());
             OutputStream os = exchange.getResponseBody();
             os.write(response.getBytes());
