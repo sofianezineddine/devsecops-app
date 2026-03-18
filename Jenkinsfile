@@ -136,14 +136,19 @@ EOF
                 echo "Java DB not found, downloading..."
                 TRIVY_JAVA_DB_REPOSITORY=ghcr.io/aquasecurity/trivy-java-db:1 \
                 trivy image --download-java-db-only
-            else
-                echo "Java DB already cached, skipping download."
             fi
 
-            # Run the scan
+            # Download official HTML template if not exists
+            if [ ! -f /tmp/trivy-html.tpl ]; then
+                curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/html.tpl \
+                  -o /tmp/trivy-html.tpl
+            fi
+
+            # Generate beautiful HTML report using template
             TRIVY_JAVA_DB_REPOSITORY=ghcr.io/aquasecurity/trivy-java-db:1 \
             trivy image \
-              --format table \
+              --format template \
+              --template "@/tmp/trivy-html.tpl" \
               -o trivy-report.html \
               --timeout 15m \
               --exit-code 0 \
@@ -151,9 +156,22 @@ EOF
               --skip-db-update \
               --skip-java-db-update \
               ${IMAGE_NAME}:${BUILD_NUMBER}
+
+            echo "Report generated successfully"
         """
         archiveArtifacts artifacts: 'trivy-report.html',
                          fingerprint: true
+
+        // publish HTML report directly in Jenkins UI
+        publishHTML(target: [
+            allowMissing:          false,
+            alwaysLinkToLastBuild: true,
+            keepAll:               true,
+            reportDir:             '.',
+            reportFiles:           'trivy-report.html',
+            reportName:            'Trivy Security Report',
+            reportTitles:          'Trivy Vulnerability Report'
+        ])
     }
 }
 
