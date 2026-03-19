@@ -218,7 +218,7 @@ EOF
                     echo "App is UP — starting ZAP scan"
                     break
                 fi
-                echo "Attempt $i failed — retrying in 5s...."
+                echo "Attempt $i failed — retrying in 5s..."
                 sleep 5
             done
  
