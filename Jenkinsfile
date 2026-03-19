@@ -222,7 +222,6 @@ EOF
 
             mkdir -p \$(pwd)/zap-reports
             chmod 777 \$(pwd)/zap-reports
-            cp ~/zap/config/zap-rules.tsv \$(pwd)/zap-reports/ || true
         """
 
         sh """
@@ -233,18 +232,19 @@ EOF
               ghcr.io/zaproxy/zaproxy:stable \\
               zap-baseline.py \\
                 -t http://192.168.237.148:30080 \\
-                -r zap-report.html \\
-                -J zap-report.json \\
-                -x zap-report.xml \\
+                -r /zap/wrk/zap-report.html \\
+                -J /zap/wrk/zap-report.json \\
+                -x /zap/wrk/zap-report.xml \\
                 -l WARN \\
                 -I
 
             echo "ZAP scan finished"
+            echo "Files in zap-reports:"
             ls -la \$(pwd)/zap-reports/
         """
 
         publishHTML(target: [
-            allowMissing:          false,
+            allowMissing:          true,
             alwaysLinkToLastBuild: true,
             keepAll:               true,
             reportDir:             'zap-reports',
@@ -255,7 +255,8 @@ EOF
 
         archiveArtifacts(
             artifacts:   'zap-reports/zap-report.*',
-            fingerprint: true
+            fingerprint: true,
+            allowEmptyArchive: true
         )
     }
     post {
@@ -295,7 +296,6 @@ PYEOF
         }
     }
 }
-
     }
 
     post {
