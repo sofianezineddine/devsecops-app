@@ -204,62 +204,45 @@ EOF
                 }
             }
         }
-        stage('DAST — OWASP ZAP') {
+    stage('DAST — OWASP ZAP') {
     steps {
         sh """
-            # 1. Wait for app to stabilize after deploy
             echo "Waiting 15 seconds for app to stabilize..."
             sleep 15
- 
-            # 2. Verify app is actually responding before scan
+
             echo "Checking app health..."
             for i in 1 2 3 4 5; do
                 if curl -sf http://192.168.237.148:30080 -o /dev/null; then
                     echo "App is UP — starting ZAP scan"
                     break
                 fi
-                echo "Attempt $i failed — retrying in 5s..."
+                echo "Attempt \$i failed — retrying in 5s..."
                 sleep 5
             done
- 
-            # 3. Create output directory with correct permissions
-            mkdir -p $(pwd)/zap-reports
-            chmod 777 $(pwd)/zap-reports
- 
-            # 4. Copy configs to workspace (ZAP can access them)
-            cp ~/zap/config/zap-rules.tsv $(pwd)/zap-reports/
+
+            mkdir -p \$(pwd)/zap-reports
+            chmod 777 \$(pwd)/zap-reports
+            cp ~/zap/config/zap-rules.tsv \$(pwd)/zap-reports/ || true
         """
- 
+
         sh """
-            # 5. Run ZAP baseline scan
-            # Flags explained:
-            # -t = target URL to scan
-            # -r = HTML report output filename
-            # -J = JSON report output filename
-            # -x = XML report output filename
-            # -l = minimum alert level: PASS INFO WARN FAIL
-            # -I = do not return error on WARN alerts
-            # -z = ZAP command line options
-            # --auto = use automation framework if config present
- 
-            docker run --rm \
-              --network devsecops \
-              -v $(pwd)/zap-reports:/zap/wrk:rw \
-              -u root \
-              ghcr.io/zaproxy/zaproxy:stable \
-              zap-baseline.py \
-                -t http://192.168.237.148:30080 \
-                -r zap-report.html \
-                -J zap-report.json \
-                -x zap-report.xml \
-                -l WARN \
+            docker run --rm \\
+              --network devsecops \\
+              -v \$(pwd)/zap-reports:/zap/wrk:rw \\
+              -u root \\
+              ghcr.io/zaproxy/zaproxy:stable \\
+              zap-baseline.py \\
+                -t http://192.168.237.148:30080 \\
+                -r zap-report.html \\
+                -J zap-report.json \\
+                -x zap-report.xml \\
+                -l WARN \\
                 -I
- 
+
             echo "ZAP scan finished"
-            ls -la $(pwd)/zap-reports/
+            ls -la \$(pwd)/zap-reports/
         """
- 
-        // 6. Publish beautiful HTML report in Jenkins UI
+
         publishHTML(target: [
             allowMissing:          false,
             alwaysLinkToLastBuild: true,
@@ -269,8 +252,7 @@ EOF
             reportName:            'OWASP ZAP DAST Report',
             reportTitles:          'ZAP Vulnerability Report'
         ])
- 
-        // 7. Archive all report formats
+
         archiveArtifacts(
             artifacts:   'zap-reports/zap-report.*',
             fingerprint: true
@@ -278,36 +260,38 @@ EOF
     }
     post {
         always {
-            // 8. Print summary to Jenkins console
-            sh """
+            sh '''
                 echo "==============================="
                 echo "=== ZAP SCAN SUMMARY ==="
                 echo "==============================="
                 if [ -f zap-reports/zap-report.json ]; then
-                    python3 -c "
+                    python3 << 'PYEOF'
 import json
-with open('zap-reports/zap-report.json') as f:
-    d = json.load(f)
-sites = d.get('site', [])
-total = {'High':0,'Medium':0,'Low':0,'Informational':0}
-for site in sites:
-    for alert in site.get('alerts', []):
-        risk = alert.get('riskdesc','').split(' ')[0]
-        if risk in total:
-            total[risk] += 1
-print(f'  CRITICAL/HIGH :  {total[chr(72)]}')
-print(f'  MEDIUM        :  {total[chr(77)+chr(101)+chr(100)+chr(105)+chr(117)+chr(109)]}')
-print(f'  LOW           :  {total[chr(76)]}')
-print(f'  INFO          :  {total[chr(73)+chr(110)+chr(102)+chr(111)+chr(114)+chr(109)+chr(97)+chr(116)+chr(105)+chr(111)+chr(110)+chr(97)+chr(108)]}')
-" 2>/dev/null || echo "  Could not parse JSON report"
+try:
+    with open('zap-reports/zap-report.json') as f:
+        d = json.load(f)
+    sites = d.get('site', [])
+    total = {'High': 0, 'Medium': 0, 'Low': 0, 'Informational': 0}
+    for site in sites:
+        for alert in site.get('alerts', []):
+            risk = alert.get('riskdesc', '').split(' ')[0]
+            if risk in total:
+                total[risk] += 1
+    print('  HIGH     : ' + str(total['High']))
+    print('  MEDIUM   : ' + str(total['Medium']))
+    print('  LOW      : ' + str(total['Low']))
+    print('  INFO     : ' + str(total['Informational']))
+except Exception as e:
+    print('  Could not parse report: ' + str(e))
+PYEOF
                 else
                     echo "  JSON report not found"
                 fi
                 echo "==============================="
-            """
+            '''
         }
         failure {
-            echo 'ZAP scan encountered errors — check report'
+            echo 'ZAP scan encountered errors — check the report'
         }
     }
 }
