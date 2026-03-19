@@ -210,7 +210,6 @@ EOF
             echo "Waiting 15 seconds for app to stabilize..."
             sleep 15
 
-            echo "Checking app health..."
             for i in 1 2 3 4 5; do
                 if curl -sf http://192.168.237.148:30080 -o /dev/null; then
                     echo "App is UP — starting ZAP scan"
@@ -225,26 +224,28 @@ EOF
         """
 
         sh """
+            # -w /zap/wrk sets working dir inside container
+            # so ZAP writes reports directly to the mounted volume
             docker run --rm \\
               --network devsecops \\
               -v \$(pwd)/zap-reports:/zap/wrk:rw \\
+              -w /zap/wrk \\
               -u root \\
               ghcr.io/zaproxy/zaproxy:stable \\
               zap-baseline.py \\
                 -t http://192.168.237.148:30080 \\
-                -r /zap/wrk/zap-report.html \\
-                -J /zap/wrk/zap-report.json \\
-                -x /zap/wrk/zap-report.xml \\
+                -r zap-report.html \\
+                -J zap-report.json \\
+                -x zap-report.xml \\
                 -l WARN \\
                 -I
 
-            echo "ZAP scan finished"
-            echo "Files in zap-reports:"
+            echo "Files generated:"
             ls -la \$(pwd)/zap-reports/
         """
 
         publishHTML(target: [
-            allowMissing:          true,
+            allowMissing:          false,
             alwaysLinkToLastBuild: true,
             keepAll:               true,
             reportDir:             'zap-reports',
@@ -254,8 +255,8 @@ EOF
         ])
 
         archiveArtifacts(
-            artifacts:   'zap-reports/zap-report.*',
-            fingerprint: true,
+            artifacts:         'zap-reports/zap-report.*',
+            fingerprint:       true,
             allowEmptyArchive: true
         )
     }
@@ -283,7 +284,7 @@ try:
     print('  LOW      : ' + str(total['Low']))
     print('  INFO     : ' + str(total['Informational']))
 except Exception as e:
-    print('  Could not parse report: ' + str(e))
+    print('  Error: ' + str(e))
 PYEOF
                 else
                     echo "  JSON report not found"
