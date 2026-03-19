@@ -212,34 +212,35 @@ EOF
 
             for i in 1 2 3 4 5; do
                 if curl -sf http://192.168.237.148:30080 -o /dev/null; then
-                    echo "App is UP — starting ZAP scan"
+                    echo "App is UP"
                     break
                 fi
-                echo "Attempt \$i failed — retrying in 5s..."
+                echo "Attempt \$i failed — retrying..."
                 sleep 5
             done
 
             mkdir -p ${WORKSPACE}/zap-reports
-            chmod 777 ${WORKSPACE}/zap-reports
-            echo "ZAP reports dir: ${WORKSPACE}/zap-reports"
-        """
 
-        sh """
-            docker run --rm \\
+            # Run ZAP — NO volume mount, reports stay inside container
+            docker run --name zap-${BUILD_NUMBER} \\
               --network devsecops \\
-              -v ${WORKSPACE}/zap-reports:/zap/wrk:rw \\
-              -w /zap/wrk \\
               -u root \\
               ghcr.io/zaproxy/zaproxy:stable \\
               zap-baseline.py \\
                 -t http://192.168.237.148:30080 \\
-                -r zap-report.html \\
-                -J zap-report.json \\
-                -x zap-report.xml \\
+                -r /tmp/zap-report.html \\
+                -J /tmp/zap-report.json \\
                 -l WARN \\
-                -I
+                -I || true
 
-            echo "Files generated:"
+            # Copy reports from container to Jenkins workspace
+            docker cp zap-${BUILD_NUMBER}:/tmp/zap-report.html ${WORKSPACE}/zap-reports/
+            docker cp zap-${BUILD_NUMBER}:/tmp/zap-report.json ${WORKSPACE}/zap-reports/
+
+            # Clean up container
+            docker rm zap-${BUILD_NUMBER}
+
+            echo "Reports generated:"
             ls -la ${WORKSPACE}/zap-reports/
         """
 
@@ -256,7 +257,7 @@ EOF
         archiveArtifacts(
             artifacts:         'zap-reports/zap-report.*',
             fingerprint:       true,
-            allowEmptyArchive: true
+            allowEmptyArchive: false
         )
     }
     post {
@@ -266,35 +267,27 @@ EOF
                 echo "=== ZAP SCAN SUMMARY ==="
                 echo "==============================="
                 if [ -f ${WORKSPACE}/zap-reports/zap-report.json ]; then
-                    python3 << 'PYEOF'
+                    python3 -c "
 import json
-try:
-    import os
-    path = os.environ.get('WORKSPACE', '.') + '/zap-reports/zap-report.json'
-    with open(path) as f:
-        d = json.load(f)
-    sites = d.get('site', [])
-    total = {'High': 0, 'Medium': 0, 'Low': 0, 'Informational': 0}
-    for site in sites:
-        for alert in site.get('alerts', []):
-            risk = alert.get('riskdesc', '').split(' ')[0]
-            if risk in total:
-                total[risk] += 1
-    print('  HIGH     : ' + str(total['High']))
-    print('  MEDIUM   : ' + str(total['Medium']))
-    print('  LOW      : ' + str(total['Low']))
-    print('  INFO     : ' + str(total['Informational']))
-except Exception as e:
-    print('  Error: ' + str(e))
-PYEOF
+with open('${WORKSPACE}/zap-reports/zap-report.json') as f:
+    d = json.load(f)
+total = {'High':0,'Medium':0,'Low':0,'Informational':0}
+for site in d.get('site',[]):
+    for a in site.get('alerts',[]):
+        r = a.get('riskdesc','').split(' ')[0]
+        if r in total: total[r]+=1
+print('  HIGH   :', total['High'])
+print('  MEDIUM :', total['Medium'])
+print('  LOW    :', total['Low'])
+print('  INFO   :', total['Informational'])
+"
                 else
-                    echo "  JSON report not found at ${WORKSPACE}/zap-reports/"
+                    echo "  No report found"
                 fi
                 echo "==============================="
             """
-        }
-        failure {
-            echo 'ZAP scan encountered errors — check the report'
+            // always clean up container if it still exists
+            sh "docker rm zap-${BUILD_NUMBER} 2>/dev/null || true"
         }
     }
 }
