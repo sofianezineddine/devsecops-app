@@ -219,16 +219,15 @@ EOF
                 sleep 5
             done
 
-            mkdir -p \$(pwd)/zap-reports
-            chmod 777 \$(pwd)/zap-reports
+            mkdir -p ${WORKSPACE}/zap-reports
+            chmod 777 ${WORKSPACE}/zap-reports
+            echo "ZAP reports dir: ${WORKSPACE}/zap-reports"
         """
 
         sh """
-            # -w /zap/wrk sets working dir inside container
-            # so ZAP writes reports directly to the mounted volume
             docker run --rm \\
               --network devsecops \\
-              -v \$(pwd)/zap-reports:/zap/wrk:rw \\
+              -v ${WORKSPACE}/zap-reports:/zap/wrk:rw \\
               -w /zap/wrk \\
               -u root \\
               ghcr.io/zaproxy/zaproxy:stable \\
@@ -241,14 +240,14 @@ EOF
                 -I
 
             echo "Files generated:"
-            ls -la \$(pwd)/zap-reports/
+            ls -la ${WORKSPACE}/zap-reports/
         """
 
         publishHTML(target: [
             allowMissing:          false,
             alwaysLinkToLastBuild: true,
             keepAll:               true,
-            reportDir:             'zap-reports',
+            reportDir:             "${WORKSPACE}/zap-reports",
             reportFiles:           'zap-report.html',
             reportName:            'OWASP ZAP DAST Report',
             reportTitles:          'ZAP Vulnerability Report'
@@ -262,15 +261,17 @@ EOF
     }
     post {
         always {
-            sh '''
+            sh """
                 echo "==============================="
                 echo "=== ZAP SCAN SUMMARY ==="
                 echo "==============================="
-                if [ -f zap-reports/zap-report.json ]; then
+                if [ -f ${WORKSPACE}/zap-reports/zap-report.json ]; then
                     python3 << 'PYEOF'
 import json
 try:
-    with open('zap-reports/zap-report.json') as f:
+    import os
+    path = os.environ.get('WORKSPACE', '.') + '/zap-reports/zap-report.json'
+    with open(path) as f:
         d = json.load(f)
     sites = d.get('site', [])
     total = {'High': 0, 'Medium': 0, 'Low': 0, 'Informational': 0}
@@ -287,10 +288,10 @@ except Exception as e:
     print('  Error: ' + str(e))
 PYEOF
                 else
-                    echo "  JSON report not found"
+                    echo "  JSON report not found at ${WORKSPACE}/zap-reports/"
                 fi
                 echo "==============================="
-            '''
+            """
         }
         failure {
             echo 'ZAP scan encountered errors — check the report'
