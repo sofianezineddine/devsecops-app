@@ -60,7 +60,194 @@ pipeline {
                 }
             }
         }
+        stage('SonarQube Report') {
+    steps {
+        withCredentials([string(
+            credentialsId: 'sonar-token',
+            variable: 'SONAR_TOKEN')]) {
+            sh '''
+                echo "Fetching SonarQube report..."
 
+                SONAR_URL="http://sonarqube:9000"
+                PROJECT="my-app"
+
+                # Fetch project metrics
+                curl -s -u "${SONAR_TOKEN}:" \
+                  "${SONAR_URL}/api/measures/component?component=${PROJECT}&metricKeys=bugs,vulnerabilities,code_smells,security_hotspots,coverage,duplicated_lines_density,ncloc,alert_status" \
+                  -o /tmp/sonar-metrics.json
+
+                # Fetch vulnerabilities
+                curl -s -u "${SONAR_TOKEN}:" \
+                  "${SONAR_URL}/api/issues/search?componentKeys=${PROJECT}&types=VULNERABILITY&severities=CRITICAL,MAJOR&ps=50" \
+                  -o /tmp/sonar-vulns.json
+
+                # Fetch bugs
+                curl -s -u "${SONAR_TOKEN}:" \
+                  "${SONAR_URL}/api/issues/search?componentKeys=${PROJECT}&types=BUG&severities=CRITICAL,MAJOR&ps=50" \
+                  -o /tmp/sonar-bugs.json
+
+                # Fetch security hotspots
+                curl -s -u "${SONAR_TOKEN}:" \
+                  "${SONAR_URL}/api/hotspots/search?projectKey=${PROJECT}&ps=50" \
+                  -o /tmp/sonar-hotspots.json
+
+                echo "Data fetched, generating report..."
+
+                # Parse metrics using shell
+                BUGS=$(grep -o '"metric":"bugs","value":"[^"]*"' /tmp/sonar-metrics.json | grep -o '"value":"[^"]*"' | tr -d '"value:' | tr -d '"' || echo 0)
+                VULNS=$(grep -o '"metric":"vulnerabilities","value":"[^"]*"' /tmp/sonar-metrics.json | grep -o '"value":"[^"]*"' | tr -d '"value:' | tr -d '"' || echo 0)
+                SMELLS=$(grep -o '"metric":"code_smells","value":"[^"]*"' /tmp/sonar-metrics.json | grep -o '"value":"[^"]*"' | tr -d '"value:' | tr -d '"' || echo 0)
+                HOTSPOTS=$(grep -o '"metric":"security_hotspots","value":"[^"]*"' /tmp/sonar-metrics.json | grep -o '"value":"[^"]*"' | tr -d '"value:' | tr -d '"' || echo 0)
+                STATUS=$(grep -o '"metric":"alert_status","value":"[^"]*"' /tmp/sonar-metrics.json | grep -o '"value":"[^"]*"' | tr -d '"value:' | tr -d '"' || echo UNKNOWN)
+                NCLOC=$(grep -o '"metric":"ncloc","value":"[^"]*"' /tmp/sonar-metrics.json | grep -o '"value":"[^"]*"' | tr -d '"value:' | tr -d '"' || echo 0)
+
+                STATUS_COLOR=$([ "$STATUS" = "OK" ] && echo "#28a745" || echo "#dc3545")
+                STATUS_ICON=$([ "$STATUS" = "OK" ] && echo "✅ PASSED" || echo "❌ FAILED")
+
+                # Generate HTML report
+                cat > sonarqube-report.html << HTMLEOF
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>SonarQube Report — my-app</title>
+<style>
+  body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }
+  h1 { color: #333; border-bottom: 3px solid #4e9bcd; padding-bottom: 10px; }
+  .summary { display: flex; flex-wrap: wrap; gap: 15px; margin: 20px 0; }
+  .card {
+    background: white; border-radius: 8px; padding: 20px;
+    min-width: 140px; text-align: center;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+  }
+  .card .number { font-size: 42px; font-weight: bold; }
+  .card .label { font-size: 13px; color: #666; margin-top: 5px; }
+  .bugs .number     { color: #dc3545; }
+  .vulns .number    { color: #ff6b35; }
+  .smells .number   { color: #ffc107; }
+  .hotspots .number { color: #fd7e14; }
+  .ncloc .number    { color: #17a2b8; }
+  .gate {
+    background: white; border-radius: 8px; padding: 20px;
+    margin: 20px 0; font-size: 22px; font-weight: bold;
+    text-align: center; box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+    color: ${STATUS_COLOR};
+  }
+  table {
+    width: 100%; border-collapse: collapse;
+    background: white; border-radius: 8px;
+    overflow: hidden; box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+    margin-top: 20px;
+  }
+  th { background: #4e9bcd; color: white; padding: 12px; text-align: left; }
+  td { padding: 10px 12px; border-bottom: 1px solid #eee; }
+  tr:hover { background: #f9f9f9; }
+  .CRITICAL { color: #dc3545; font-weight: bold; }
+  .MAJOR    { color: #ff6b35; font-weight: bold; }
+  .MINOR    { color: #ffc107; }
+  .INFO     { color: #17a2b8; }
+  .btn {
+    display: inline-block; background: #4e9bcd; color: white;
+    padding: 10px 20px; border-radius: 5px;
+    text-decoration: none; margin-top: 15px;
+  }
+</style>
+</head>
+<body>
+
+<h1>🔍 SonarQube Security & Code Report</h1>
+<p><strong>Project:</strong> my-app &nbsp;|&nbsp;
+   <strong>Build:</strong> #${BUILD_NUMBER} &nbsp;|&nbsp;
+   <strong>Date:</strong> $(date '+%Y-%m-%d %H:%M:%S')</p>
+
+<div class="gate">Quality Gate: ${STATUS_ICON}</div>
+
+<div class="summary">
+  <div class="card bugs">
+    <div class="number">${BUGS}</div>
+    <div class="label">🐛 Bugs</div>
+  </div>
+  <div class="card vulns">
+    <div class="number">${VULNS}</div>
+    <div class="label">🔓 Vulnerabilities</div>
+  </div>
+  <div class="card smells">
+    <div class="number">${SMELLS}</div>
+    <div class="label">💨 Code Smells</div>
+  </div>
+  <div class="card hotspots">
+    <div class="number">${HOTSPOTS}</div>
+    <div class="label">🔥 Security Hotspots</div>
+  </div>
+  <div class="card ncloc">
+    <div class="number">${NCLOC}</div>
+    <div class="label">📝 Lines of Code</div>
+  </div>
+</div>
+
+<h2>🔓 Vulnerabilities (Critical & Major)</h2>
+<table>
+  <tr>
+    <th>Severity</th>
+    <th>Component</th>
+    <th>Message</th>
+    <th>Line</th>
+  </tr>
+  $(cat /tmp/sonar-vulns.json | grep -o '"severity":"[^"]*","message":"[^"]*","component":"[^"]*"' | \
+    awk -F'"' '{
+      sev=$4; msg=$8; comp=$12;
+      gsub(/.*:/, "", comp);
+      print "<tr><td class=\""sev"\">"sev"</td><td>"comp"</td><td>"msg"</td><td>-</td></tr>"
+    }' || echo "<tr><td colspan=4>No vulnerabilities found ✅</td></tr>")
+</table>
+
+<h2>🐛 Bugs (Critical & Major)</h2>
+<table>
+  <tr>
+    <th>Severity</th>
+    <th>Component</th>
+    <th>Message</th>
+  </tr>
+  $(cat /tmp/sonar-bugs.json | grep -o '"severity":"[^"]*","message":"[^"]*","component":"[^"]*"' | \
+    awk -F'"' '{
+      sev=$4; msg=$8; comp=$12;
+      gsub(/.*:/, "", comp);
+      print "<tr><td class=\""sev"\">"sev"</td><td>"comp"</td><td>"msg"</td></tr>"
+    }' || echo "<tr><td colspan=3>No critical bugs found ✅</td></tr>")
+</table>
+
+<br>
+<a class="btn" href="http://192.168.237.148:9000/dashboard?id=my-app"
+   target="_blank">📊 Open Full SonarQube Dashboard</a>
+&nbsp;
+<a class="btn" href="http://192.168.237.148:9000/project/issues?id=my-app&types=VULNERABILITY"
+   target="_blank">🔓 All Vulnerabilities</a>
+&nbsp;
+<a class="btn" href="http://192.168.237.148:9000/security_hotspots?id=my-app"
+   target="_blank">🔥 Security Hotspots</a>
+
+</body>
+</html>
+HTMLEOF
+
+                echo "Report generated: sonarqube-report.html"
+            '''
+        }
+
+        archiveArtifacts artifacts: 'sonarqube-report.html',
+                         fingerprint: true
+
+        publishHTML(target: [
+            allowMissing:          false,
+            alwaysLinkToLastBuild: true,
+            keepAll:               true,
+            reportDir:             '.',
+            reportFiles:           'sonarqube-report.html',
+            reportName:            'SonarQube Report',
+            reportTitles:          'Code & Security Analysis'
+        ])
+    }
+}
         stage('Publish to Nexus') {
             steps {
                 withCredentials([usernamePassword(
