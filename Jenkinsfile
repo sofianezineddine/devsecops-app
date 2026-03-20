@@ -213,7 +213,7 @@ EOF
 
             // Get the NodePort dynamically
             def nodePort = sh(
-                script: "kubectl get svc my-app-svc -n webapps -o jsonpath='{.spec.ports[0].nodePort}'",
+                script: "kubectl get svc my-app-service -n webapps -o jsonpath='{.spec.ports[0].nodePort}'",
                 returnStdout: true
             ).trim()
 
