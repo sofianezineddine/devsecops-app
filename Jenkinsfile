@@ -204,6 +204,99 @@ EOF
                 }
             }
         }
+
+        stage('OWASP ZAP — DAST Scan') {
+    steps {
+        script {
+            // Wait for app to be ready
+            sh 'sleep 15'
+
+            // Get the NodePort dynamically
+            def nodePort = sh(
+                script: "kubectl get svc my-app-svc -n webapps -o jsonpath='{.spec.ports[0].nodePort}'",
+                returnStdout: true
+            ).trim()
+
+            def appUrl = "http://192.168.237.148:${nodePort}"
+            echo "Scanning: ${appUrl}"
+
+            // Run ZAP baseline scan
+            sh """
+                mkdir -p /tmp/zap-reports
+
+                zap.sh -daemon \
+                    -host 127.0.0.1 \
+                    -port 8090 \
+                    -config api.disablekey=true \
+                    -config api.addrs.addr.name=.* \
+                    -config api.addrs.addr.regex=true &
+
+                # Wait for ZAP to start
+                echo "Waiting for ZAP daemon..."
+                sleep 30
+
+                # Spider the application
+                curl -s "http://127.0.0.1:8090/JSON/spider/action/scan/?url=${appUrl}&maxChildren=10" | python3 -m json.tool
+
+                # Wait for spider to complete
+                sleep 20
+
+                # Run active scan
+                curl -s "http://127.0.0.1:8090/JSON/ascan/action/scan/?url=${appUrl}&recurse=true" | python3 -m json.tool
+
+                # Wait for active scan (adjust based on app size)
+                sleep 60
+
+                # Generate HTML report
+                curl -s "http://127.0.0.1:8090/OTHER/core/other/htmlreport/" \
+                    -o /tmp/zap-reports/zap-report.html
+
+                # Generate JSON report
+                curl -s "http://127.0.0.1:8090/JSON/core/view/alerts/?baseurl=${appUrl}&start=0&count=200" \
+                    -o /tmp/zap-reports/zap-alerts.json
+
+                # Copy report to workspace
+                cp /tmp/zap-reports/zap-report.html zap-report.html
+
+                # Shutdown ZAP
+                curl -s "http://127.0.0.1:8090/JSON/core/action/shutdown/" || true
+            """
+        }
+
+        archiveArtifacts artifacts: 'zap-report.html',
+                         fingerprint: true
+
+        publishHTML(target: [
+            allowMissing:          false,
+            alwaysLinkToLastBuild: true,
+            keepAll:               true,
+            reportDir:             '.',
+            reportFiles:           'zap-report.html',
+            reportName:            'OWASP ZAP Security Report',
+            reportTitles:          'DAST Vulnerability Report'
+        ])
+
+        // Parse alerts and fail on HIGH severity
+        script {
+            def alerts = readJSON file: 'zap-report.html'
+            def highAlerts = sh(
+                script: """python3 -c "
+import json
+with open('/tmp/zap-reports/zap-alerts.json') as f:
+    data = json.load(f)
+high = [a for a in data.get('alerts',[]) if a.get('risk') == 'High']
+print(len(high))
+"
+                """,
+                returnStdout: true
+            ).trim().toInteger()
+
+            if (highAlerts > 0) {
+                unstable("ZAP found ${highAlerts} HIGH severity vulnerabilities!")
+            }
+        }
+    }
+}
     
     }
 
