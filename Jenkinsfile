@@ -205,7 +205,7 @@ EOF
             }
         }
 
-        stage('Falco — Runtime Security') {
+       stage('Falco — Runtime Security') {
     steps {
         sh '''
             echo "=========================================="
@@ -216,48 +216,29 @@ EOF
 
             LOG=/var/log/falco/falco_events.log
 
-            # Check if Falco log exists
             if [ ! -f "$LOG" ]; then
-                echo "WARNING: Falco log not found at $LOG"
-                echo "Make sure Falco is running and log is mounted"
-                cat > falco-report.html << 'HTMLEOF'
-<!DOCTYPE html>
-<html>
-<body style="font-family:Arial;padding:20px;">
+                echo "WARNING: Falco log not found"
+                cat > falco-report.html << HTMLEOF
+<!DOCTYPE html><html><body style="font-family:Arial;padding:20px;">
 <h2>⚠️ Falco Not Available</h2>
-<p>Falco log file not found. Make sure:</p>
-<ul>
-  <li>Falco service is running: <code>sudo systemctl status falco-modern-bpf</code></li>
-  <li>Log file exists: <code>/var/log/falco/falco_events.log</code></li>
-  <li>Volume is mounted in Jenkins container</li>
-</ul>
-</body>
-</html>
+<p>Log file not found at $LOG</p>
+</body></html>
 HTMLEOF
                 exit 0
             fi
 
-            # Count events by priority
             TOTAL=$(wc -l < "$LOG" 2>/dev/null || echo 0)
             CRITICAL=$(grep -ci '"priority":"Critical"' "$LOG" 2>/dev/null || echo 0)
             ERROR=$(grep -ci '"priority":"Error"' "$LOG" 2>/dev/null || echo 0)
             WARNING=$(grep -ci '"priority":"Warning"' "$LOG" 2>/dev/null || echo 0)
             NOTICE=$(grep -ci '"priority":"Notice"' "$LOG" 2>/dev/null || echo 0)
-            INFO=$(grep -ci '"priority":"Informational"' "$LOG" 2>/dev/null || echo 0)
 
-            # Get last 10 events for report
-            LAST_EVENTS=$(tail -10 "$LOG" 2>/dev/null || echo "No events")
-
-            echo ""
-            echo "=== Falco Runtime Security Summary ==="
             echo "Total events:  $TOTAL"
             echo "Critical:      $CRITICAL"
             echo "Error:         $ERROR"
             echo "Warning:       $WARNING"
             echo "Notice:        $NOTICE"
-            echo ""
 
-            # Determine overall status
             if [ "$CRITICAL" -gt 0 ]; then
                 OVERALL_STATUS="CRITICAL"
                 STATUS_COLOR="#dc3545"
@@ -276,9 +257,8 @@ HTMLEOF
                 STATUS_ICON="✅"
             fi
 
-            echo "Overall Status: $STATUS_ICON $OVERALL_STATUS"
+            echo "Status: $STATUS_ICON $OVERALL_STATUS"
 
-            # Generate HTML report
             cat > falco-report.html << HTMLEOF
 <!DOCTYPE html>
 <html lang="en">
@@ -286,35 +266,18 @@ HTMLEOF
 <meta charset="UTF-8">
 <title>Falco Runtime Security Report</title>
 <style>
-  body {
-    font-family: Arial, sans-serif;
-    margin: 0; padding: 20px;
-    background: #f5f5f5;
-  }
+  body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }
   h1 { color: #333; border-bottom: 3px solid #e74c3c; padding-bottom: 10px; }
   h2 { color: #555; margin-top: 30px; }
   .status-banner {
-    background: ${STATUS_COLOR};
-    color: white;
-    padding: 20px;
-    border-radius: 8px;
-    font-size: 24px;
-    font-weight: bold;
-    text-align: center;
-    margin: 20px 0;
+    background: ${STATUS_COLOR}; color: white; padding: 20px;
+    border-radius: 8px; font-size: 24px; font-weight: bold;
+    text-align: center; margin: 20px 0;
   }
-  .summary {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 15px;
-    margin: 20px 0;
-  }
+  .summary { display: flex; flex-wrap: wrap; gap: 15px; margin: 20px 0; }
   .card {
-    background: white;
-    border-radius: 8px;
-    padding: 20px;
-    min-width: 130px;
-    text-align: center;
+    background: white; border-radius: 8px; padding: 20px;
+    min-width: 130px; text-align: center;
     box-shadow: 0 2px 6px rgba(0,0,0,0.1);
   }
   .card .number { font-size: 42px; font-weight: bold; }
@@ -324,42 +287,27 @@ HTMLEOF
   .error    .number { color: #ff6b35; }
   .warning  .number { color: #ffc107; }
   .notice   .number { color: #17a2b8; }
-  .info     .number { color: #6c757d; }
   table {
-    width: 100%;
-    border-collapse: collapse;
-    background: white;
-    border-radius: 8px;
-    overflow: hidden;
-    box-shadow: 0 2px 6px rgba(0,0,0,0.1);
-    margin-top: 15px;
+    width: 100%; border-collapse: collapse; background: white;
+    border-radius: 8px; overflow: hidden;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.1); margin-top: 15px;
   }
-  th {
-    background: #e74c3c;
-    color: white;
-    padding: 12px;
-    text-align: left;
-    font-size: 14px;
-  }
-  td {
-    padding: 10px 12px;
-    border-bottom: 1px solid #eee;
-    font-size: 13px;
-    word-break: break-all;
-  }
+  th { background: #e74c3c; color: white; padding: 12px; text-align: left; }
+  td { padding: 10px 12px; border-bottom: 1px solid #eee;
+       font-size: 12px; word-break: break-all; }
   tr:hover { background: #f9f9f9; }
   .Critical     { color: #dc3545; font-weight: bold; }
   .Error        { color: #ff6b35; font-weight: bold; }
   .Warning      { color: #ffc107; font-weight: bold; }
   .Notice       { color: #17a2b8; }
-  .Informational{ color: #6c757d; }
-  .no-events { color: #28a745; font-style: italic; padding: 15px; }
+  .no-events    { color: #28a745; font-style: italic; padding: 15px; }
+  pre { background: #1e1e1e; color: #d4d4d4; padding: 15px;
+        border-radius: 5px; overflow-x: auto; font-size: 11px; }
 </style>
 </head>
 <body>
 
 <h1>🛡️ Falco Runtime Security Report</h1>
-
 <p>
   <strong>Project:</strong> my-app &nbsp;|&nbsp;
   <strong>Build:</strong> #${BUILD_NUMBER} &nbsp;|&nbsp;
@@ -396,64 +344,50 @@ HTMLEOF
 
 <h2>🚨 Critical Events</h2>
 <table>
-  <tr><th>Time</th><th>Rule</th><th>Output</th></tr>
+  <tr><th>Time</th><th>Rule</th><th>Pod</th><th>Output</th></tr>
   $(grep -i '"priority":"Critical"' "$LOG" 2>/dev/null | tail -20 | \
-    awk -F'"' '{
-      time=""; rule=""; output="";
-      for(i=1;i<=NF;i++) {
-        if($i=="time") time=$(i+2);
-        if($i=="rule") rule=$(i+2);
-        if($i=="output") output=$(i+2);
-      }
-      print "<tr><td>"time"</td><td class=\"Critical\">"rule"</td><td>"output"</td></tr>"
-    }' || echo '<tr><td colspan="3" class="no-events">✅ No critical events detected</td></tr>')
+    while IFS= read -r line; do
+      time=$(echo "$line" | grep -o '"time":"[^"]*"' | cut -d'"' -f4 | cut -T 19 || echo "-")
+      rule=$(echo "$line" | grep -o '"rule":"[^"]*"' | cut -d'"' -f4 || echo "-")
+      pod=$(echo "$line" | grep -o '"k8s.pod.name":"[^"]*"' | cut -d'"' -f4 || echo "-")
+      output=$(echo "$line" | grep -o '"output":"[^"]*"' | cut -d'"' -f4 || echo "-")
+      echo "<tr><td>$time</td><td class='Critical'>$rule</td><td>$pod</td><td>$output</td></tr>"
+    done || echo '<tr><td colspan="4" class="no-events">✅ No critical events</td></tr>')
 </table>
 
 <h2>❌ Error Events</h2>
 <table>
-  <tr><th>Time</th><th>Rule</th><th>Output</th></tr>
+  <tr><th>Time</th><th>Rule</th><th>Pod</th><th>Output</th></tr>
   $(grep -i '"priority":"Error"' "$LOG" 2>/dev/null | tail -20 | \
-    awk -F'"' '{
-      time=""; rule=""; output="";
-      for(i=1;i<=NF;i++) {
-        if($i=="time") time=$(i+2);
-        if($i=="rule") rule=$(i+2);
-        if($i=="output") output=$(i+2);
-      }
-      print "<tr><td>"time"</td><td class=\"Error\">"rule"</td><td>"output"</td></tr>"
-    }' || echo '<tr><td colspan="3" class="no-events">✅ No error events detected</td></tr>')
+    while IFS= read -r line; do
+      time=$(echo "$line" | grep -o '"time":"[^"]*"' | cut -d'"' -f4 | cut -c1-19 || echo "-")
+      rule=$(echo "$line" | grep -o '"rule":"[^"]*"' | cut -d'"' -f4 || echo "-")
+      pod=$(echo "$line" | grep -o '"k8s.pod.name":"[^"]*"' | cut -d'"' -f4 || echo "-")
+      output=$(echo "$line" | grep -o '"output":"[^"]*"' | cut -d'"' -f4 | head -c 200 || echo "-")
+      echo "<tr><td>$time</td><td class='Error'>$rule</td><td>$pod</td><td>$output</td></tr>"
+    done || echo '<tr><td colspan="4" class="no-events">✅ No error events</td></tr>')
 </table>
 
 <h2>⚠️ Warning Events</h2>
 <table>
-  <tr><th>Time</th><th>Rule</th><th>Output</th></tr>
+  <tr><th>Time</th><th>Rule</th><th>Pod</th><th>Output</th></tr>
   $(grep -i '"priority":"Warning"' "$LOG" 2>/dev/null | tail -20 | \
-    awk -F'"' '{
-      time=""; rule=""; output="";
-      for(i=1;i<=NF;i++) {
-        if($i=="time") time=$(i+2);
-        if($i=="rule") rule=$(i+2);
-        if($i=="output") output=$(i+2);
-      }
-      print "<tr><td>"time"</td><td class=\"Warning\">"rule"</td><td>"output"</td></tr>"
-    }' || echo '<tr><td colspan="3" class="no-events">✅ No warning events detected</td></tr>')
+    while IFS= read -r line; do
+      time=$(echo "$line" | grep -o '"time":"[^"]*"' | cut -d'"' -f4 | cut -c1-19 || echo "-")
+      rule=$(echo "$line" | grep -o '"rule":"[^"]*"' | cut -d'"' -f4 || echo "-")
+      pod=$(echo "$line" | grep -o '"k8s.pod.name":"[^"]*"' | cut -d'"' -f4 || echo "-")
+      output=$(echo "$line" | grep -o '"output":"[^"]*"' | cut -d'"' -f4 | head -c 200 || echo "-")
+      echo "<tr><td>$time</td><td class='Warning'>$rule</td><td>$pod</td><td>$output</td></tr>"
+    done || echo '<tr><td colspan="4" class="no-events">✅ No warning events</td></tr>')
 </table>
 
 <h2>📋 Last 10 Raw Events</h2>
-<table>
-  <tr><th>Raw Event</th></tr>
-  $(tail -10 "$LOG" 2>/dev/null | \
-    awk '{print "<tr><td style=\"font-size:11px;font-family:monospace;\">"$0"</td></tr>"}' || \
-    echo '<tr><td>No events</td></tr>')
-</table>
+<pre>$(tail -10 "$LOG" 2>/dev/null || echo "No events")</pre>
 
 </body>
 </html>
 HTMLEOF
 
-            echo "Falco HTML report generated successfully"
-
-            # Save JSON summary
             cat > falco-report.json << EOF
 {
   "build": "${BUILD_NUMBER}",
@@ -467,14 +401,12 @@ HTMLEOF
 }
 EOF
 
-            # Fail build on CRITICAL events
+            echo "✅ Falco report generated"
+
             if [ "$CRITICAL" -gt 0 ]; then
-                echo ""
-                echo "🚨 BUILD FAILED: $CRITICAL CRITICAL runtime security events detected!"
+                echo "🚨 CRITICAL events detected — failing build!"
                 exit 1
             fi
-
-            echo "✅ No critical runtime security events detected"
         '''
 
         archiveArtifacts artifacts: 'falco-report.html, falco-report.json',
