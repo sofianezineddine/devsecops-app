@@ -1,0 +1,204 @@
+{
+  "title": "Falco Runtime Security",
+  "uid": "falco-devsecops",
+  "tags": ["falco", "security", "devsecops"],
+  "timezone": "browser",
+  "refresh": "30s",
+  "panels": [
+    {
+      "id": 1,
+      "title": "🚨 Total Security Events",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 4, "x": 0, "y": 0},
+      "targets": [{
+        "datasource": "Loki",
+        "expr": "count_over_time({job=\"falco\"}[24h])",
+        "legendFormat": "Total Events"
+      }],
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "thresholds": {
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 10},
+              {"color": "red", "value": 50}
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 2,
+      "title": "🔴 Critical Events",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 4, "x": 4, "y": 0},
+      "targets": [{
+        "datasource": "Loki",
+        "expr": "count_over_time({job=\"falco\", priority=\"Critical\"}[24h])",
+        "legendFormat": "Critical"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "fixed", "fixedColor": "red"},
+          "thresholds": {
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "red", "value": 1}
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 3,
+      "title": "🟠 Error Events",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 4, "x": 8, "y": 0},
+      "targets": [{
+        "datasource": "Loki",
+        "expr": "count_over_time({job=\"falco\", priority=\"Error\"}[24h])",
+        "legendFormat": "Error"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "fixed", "fixedColor": "orange"}
+        }
+      }
+    },
+    {
+      "id": 4,
+      "title": "🟡 Warning Events",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 4, "x": 12, "y": 0},
+      "targets": [{
+        "datasource": "Loki",
+        "expr": "count_over_time({job=\"falco\", priority=\"Warning\"}[24h])",
+        "legendFormat": "Warning"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "fixed", "fixedColor": "yellow"}
+        }
+      }
+    },
+    {
+      "id": 5,
+      "title": "🔵 Notice Events",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 4, "x": 16, "y": 0},
+      "targets": [{
+        "datasource": "Loki",
+        "expr": "count_over_time({job=\"falco\", priority=\"Notice\"}[24h])",
+        "legendFormat": "Notice"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "fixed", "fixedColor": "blue"}
+        }
+      }
+    },
+    {
+      "id": 6,
+      "title": "📈 Events Over Time",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 4},
+      "targets": [
+        {
+          "datasource": "Loki",
+          "expr": "sum by (priority) (count_over_time({job=\"falco\"}[5m]))",
+          "legendFormat": "{{priority}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10
+          }
+        },
+        "overrides": [
+          {"matcher": {"id": "byName", "options": "Critical"},
+           "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "red"}}]},
+          {"matcher": {"id": "byName", "options": "Error"},
+           "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "orange"}}]},
+          {"matcher": {"id": "byName", "options": "Warning"},
+           "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "yellow"}}]},
+          {"matcher": {"id": "byName", "options": "Notice"},
+           "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "blue"}}]}
+        ]
+      }
+    },
+    {
+      "id": 7,
+      "title": "🔥 Top Triggered Rules",
+      "type": "barchart",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 12},
+      "targets": [{
+        "datasource": "Loki",
+        "expr": "sum by (rule) (count_over_time({job=\"falco\"}[24h]))",
+        "legendFormat": "{{rule}}"
+      }]
+    },
+    {
+      "id": 8,
+      "title": "🥧 Events by Priority",
+      "type": "piechart",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 12},
+      "targets": [{
+        "datasource": "Loki",
+        "expr": "sum by (priority) (count_over_time({job=\"falco\"}[24h]))",
+        "legendFormat": "{{priority}}"
+      }],
+      "options": {
+        "pieType": "donut",
+        "legend": {"displayMode": "table", "placement": "right"}
+      }
+    },
+    {
+      "id": 9,
+      "title": "📋 Live Falco Events Log",
+      "type": "logs",
+      "gridPos": {"h": 12, "w": 24, "x": 0, "y": 20},
+      "targets": [{
+        "datasource": "Loki",
+        "expr": "{job=\"falco\"}",
+        "legendFormat": ""
+      }],
+      "options": {
+        "showTime": true,
+        "showLabels": true,
+        "showCommonLabels": false,
+        "wrapLogMessage": true,
+        "prettifyLogMessage": false,
+        "enableLogDetails": true,
+        "sortOrder": "Descending"
+      }
+    },
+    {
+      "id": 10,
+      "title": "🚨 Critical & Error Events Only",
+      "type": "logs",
+      "gridPos": {"h": 10, "w": 24, "x": 0, "y": 32},
+      "targets": [{
+        "datasource": "Loki",
+        "expr": "{job=\"falco\"} | json | priority=~\"Critical|Error\"",
+        "legendFormat": ""
+      }],
+      "options": {
+        "showTime": true,
+        "showLabels": true,
+        "wrapLogMessage": true,
+        "enableLogDetails": true,
+        "sortOrder": "Descending"
+      }
+    }
+  ],
+  "time": {"from": "now-24h", "to": "now"},
+  "timepicker": {}
+}
