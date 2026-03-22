@@ -231,9 +231,11 @@ EOF
                     -config api.disablekey=true \
                     -config api.addrs.addr.name=.* \
                     -config api.addrs.addr.regex=true &
+                    -silent &
+
 
                 echo "Waiting for ZAP daemon..."
-                for i in \$(seq 1 40); do
+                for i in \$(seq 1 60); do
                     curl -s http://127.0.0.1:8090/JSON/core/view/version/ \
                         > /dev/null 2>&1 && echo "ZAP ready!" && break
                     echo "Attempt \$i/40..."
