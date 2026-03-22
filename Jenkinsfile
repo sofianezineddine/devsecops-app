@@ -230,7 +230,8 @@ EOF
                     -port 8090 \
                     -config api.disablekey=true \
                     -config api.addrs.addr.name=.* \
-                    -config api.addrs.addr.regex=true &
+                    -config api.addrs.addr.regex=true \
+                    -config api.autoupdate=false \
                     -silent &
 
 
@@ -291,19 +292,210 @@ EOF
     
     }
 
-    post {
-        always {
+   post {
+    always {
+        script {
+            // Collect stage results
+            def stageResults = []
+            def allStages = [
+                'Checkout',
+                'Build & Test',
+                'SonarQube Analysis',
+                'Quality Gate',
+                'Publish to Nexus',
+                'Build & Push Docker Image',
+                'Trivy Image Scan',
+                'Render K8s Manifest',
+                'Deploy to Kubernetes',
+                'OWASP ZAP — DAST Scan'
+            ]
+
+            // Build stage status table
+            def stageRows = ''
+            currentBuild.stages?.each { stage ->
+                def status = stage.status ?: 'UNKNOWN'
+                def color = status == 'SUCCESS' ? '#28a745' :
+                            status == 'FAILED'  ? '#dc3545' :
+                            status == 'ABORTED' ? '#6c757d' :
+                            status == 'SKIPPED' ? '#ffc107' : '#17a2b8'
+                def icon  = status == 'SUCCESS' ? '✅' :
+                            status == 'FAILED'  ? '❌' :
+                            status == 'ABORTED' ? '⛔' :
+                            status == 'SKIPPED' ? '⏭️' : 'ℹ️'
+
+                def duration = stage.durationMillis ?
+                    "${(stage.durationMillis / 1000).toInteger()}s" : '-'
+
+                def errorMsg = ''
+                if (status == 'FAILED' && stage.errorMessage) {
+                    errorMsg = "<br><small style='color:#dc3545'>" +
+                               stage.errorMessage.take(200) +
+                               "</small>"
+                }
+
+                stageRows += """
+                    <tr>
+                        <td style='padding:8px 12px; border-bottom:1px solid #eee;'>
+                            ${icon} ${stage.name}
+                        </td>
+                        <td style='padding:8px 12px; border-bottom:1px solid #eee;
+                                   color:${color}; font-weight:bold;'>
+                            ${status}
+                        </td>
+                        <td style='padding:8px 12px; border-bottom:1px solid #eee;
+                                   color:#666;'>
+                            ${duration}
+                        </td>
+                        <td style='padding:8px 12px; border-bottom:1px solid #eee;
+                                   font-size:12px;'>
+                            ${errorMsg}
+                        </td>
+                    </tr>
+                """
+            }
+
+            // Overall status color
+            def overallColor = currentBuild.result == 'SUCCESS' ? '#28a745' :
+                               currentBuild.result == 'FAILURE' ? '#dc3545' :
+                               currentBuild.result == 'UNSTABLE'? '#ffc107' : '#6c757d'
+
+            def overallIcon  = currentBuild.result == 'SUCCESS' ? '✅' :
+                               currentBuild.result == 'FAILURE' ? '❌' :
+                               currentBuild.result == 'UNSTABLE'? '⚠️' : '⛔'
+
+            def totalDuration = currentBuild.durationString ?: '-'
+
+            def emailBody = """
+<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"></head>
+<body style="font-family:Arial,sans-serif; margin:0; padding:0; background:#f5f5f5;">
+
+  <div style="max-width:700px; margin:20px auto; background:white;
+              border-radius:8px; overflow:hidden;
+              box-shadow:0 2px 10px rgba(0,0,0,0.1);">
+
+    <!-- Header -->
+    <div style="background:${overallColor}; padding:25px; text-align:center;">
+      <h1 style="color:white; margin:0; font-size:24px;">
+        ${overallIcon} Pipeline ${currentBuild.result ?: 'UNKNOWN'}
+      </h1>
+    </div>
+
+    <!-- Info Bar -->
+    <div style="background:#f8f9fa; padding:15px 20px;
+                border-bottom:1px solid #dee2e6;">
+      <table style="width:100%; border-collapse:collapse;">
+        <tr>
+          <td style="padding:4px 0;">
+            <strong>📋 Job:</strong> ${env.JOB_NAME}
+          </td>
+          <td style="padding:4px 0;">
+            <strong>🔢 Build:</strong> #${env.BUILD_NUMBER}
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:4px 0;">
+            <strong>⏱️ Duration:</strong> ${totalDuration}
+          </td>
+          <td style="padding:4px 0;">
+            <strong>🌿 Branch:</strong> master
+          </td>
+        </tr>
+        <tr>
+          <td colspan="2" style="padding:4px 0;">
+            <strong>🔗 URL:</strong>
+            <a href="${env.BUILD_URL}" style="color:#4e9bcd;">
+              ${env.BUILD_URL}
+            </a>
+          </td>
+        </tr>
+      </table>
+    </div>
+
+    <!-- Stage Results Table -->
+    <div style="padding:20px;">
+      <h2 style="color:#333; margin-top:0; border-bottom:2px solid #dee2e6;
+                 padding-bottom:10px;">
+        📊 Pipeline Stage Results
+      </h2>
+
+      <table style="width:100%; border-collapse:collapse;
+                    border-radius:8px; overflow:hidden;
+                    box-shadow:0 1px 4px rgba(0,0,0,0.1);">
+        <thead>
+          <tr style="background:#343a40; color:white;">
+            <th style="padding:10px 12px; text-align:left;">Stage</th>
+            <th style="padding:10px 12px; text-align:left;">Status</th>
+            <th style="padding:10px 12px; text-align:left;">Duration</th>
+            <th style="padding:10px 12px; text-align:left;">Details</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${stageRows ?: '<tr><td colspan="4" style="padding:10px; color:#666;">No stage data available</td></tr>'}
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Security Reports Links -->
+    <div style="padding:0 20px 20px;">
+      <h2 style="color:#333; border-bottom:2px solid #dee2e6;
+                 padding-bottom:10px;">
+        🔒 Security Reports
+      </h2>
+      <table style="width:100%; border-collapse:collapse;">
+        <tr>
+          <td style="padding:8px;">
+            <a href="${env.BUILD_URL}Trivy_20Security_20Report"
+               style="background:#17a2b8; color:white; padding:8px 16px;
+                      border-radius:4px; text-decoration:none; display:inline-block;">
+              🐳 Trivy Report
+            </a>
+          </td>
+          <td style="padding:8px;">
+            <a href="${env.BUILD_URL}OWASP_20ZAP_20Security_20Report"
+               style="background:#e74c3c; color:white; padding:8px 16px;
+                      border-radius:4px; text-decoration:none; display:inline-block;">
+              🕷️ ZAP Report
+            </a>
+          </td>
+          <td style="padding:8px;">
+            <a href="http://192.168.237.148:9000/dashboard?id=my-app"
+               style="background:#4e9bcd; color:white; padding:8px 16px;
+                      border-radius:4px; text-decoration:none; display:inline-block;">
+              📊 SonarQube
+            </a>
+          </td>
+          <td style="padding:8px;">
+            <a href="http://192.168.237.148:3000/d/falco-runtime"
+               style="background:#e74c3c; color:white; padding:8px 16px;
+                      border-radius:4px; text-decoration:none; display:inline-block;">
+              🛡️ Falco Dashboard
+            </a>
+          </td>
+        </tr>
+      </table>
+    </div>
+
+    <!-- Footer -->
+    <div style="background:#343a40; color:#adb5bd; padding:15px;
+                text-align:center; font-size:12px;">
+      DevSecOps Pipeline — Jenkins CI/CD |
+      Generated: ${new Date().format('yyyy-MM-dd HH:mm:ss')}
+    </div>
+
+  </div>
+</body>
+</html>
+            """
+
             emailext(
-                subject: "Build ${currentBuild.result}: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
-                body: """
-                    <h2>Pipeline: ${currentBuild.result}</h2>
-                    <p>Job: ${env.JOB_NAME}</p>
-                    <p>Build: #${env.BUILD_NUMBER}</p>
-                    <p>URL: <a href="${env.BUILD_URL}">${env.BUILD_URL}</a></p>
-                """,
+                subject: "${overallIcon} [${currentBuild.result ?: 'UNKNOWN'}] ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+                body: emailBody,
                 to: 'sofianezineddine77@gmail.com',
                 mimeType: 'text/html'
             )
         }
     }
+}
 }
