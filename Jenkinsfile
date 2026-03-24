@@ -372,6 +372,31 @@ EOF
                 ])
             }
         }
+        stage('KEEP - Push Alerts for AI Correlation') {
+    steps {
+        script {
+            def KEEP_API = 'http://192.168.237.148:8085'
+            withCredentials([string(credentialsId: 'keep-api-key', variable: 'KEEP_KEY')]) {
+                // Trivy (le rapport JSON existe déjà grâce à la stage Trivy)
+                sh """
+                    curl -X POST ${KEEP_API}/alerts/event/trivy \
+                      -H 'X-API-KEY: ${KEEP_KEY}' \
+                      -H 'Content-Type: application/json' \
+                      --data @trivy-report.json || true
+                """
+
+                // ZAP (le rapport JSON existe déjà)
+                sh """
+                    curl -X POST ${KEEP_API}/alerts/event/zap \
+                      -H 'X-API-KEY: ${KEEP_KEY}' \
+                      -H 'Content-Type: application/json' \
+                      --data @zap-alerts.json || true
+                """
+            }
+            echo "Trivy + ZAP alerts pushed to KEEP AI"
+        }
+    }
+}
     }
 
     post {
