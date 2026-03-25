@@ -214,6 +214,17 @@ EOF
                                       --skip-db-update \
                                       --skip-java-db-update \
                                       ${IMAGE_NAME}:${BUILD_NUMBER}
+
+                                    TRIVY_JAVA_DB_REPOSITORY=ghcr.io/aquasecurity/trivy-java-db:1 \
+                                    trivy image \
+                                      --format json \
+                                      -o trivy-report.json \
+                                      --timeout 15m \
+                                      --exit-code 0 \
+                                      --scanners vuln \
+                                      --skip-db-update \
+                                      --skip-java-db-update \
+                                      ${IMAGE_NAME}:${BUILD_NUMBER}
                                 """
                                 env.STAGE_TRIVY = 'SUCCESS'
                             } catch(e) {
@@ -221,7 +232,7 @@ EOF
                                 throw e
                             }
                         }
-                        archiveArtifacts artifacts: 'trivy-report.html',
+                        archiveArtifacts artifacts: 'trivy-report.html,trivy-report.json',
                                          fingerprint: true
                         publishHTML(target: [
                             allowMissing:          false,
