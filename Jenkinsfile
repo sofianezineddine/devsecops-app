@@ -225,6 +225,16 @@ EOF
                                       --skip-db-update \
                                       --skip-java-db-update \
                                       ${IMAGE_NAME}:${BUILD_NUMBER}
+
+
+                                    echo "✅ Trivy scan complete"
+
+                                    # Ship to KEEP
+                                    echo "Shipping Trivy results to KEEP..."
+                                    /usr/local/bin/trivy-shipper.sh \
+                                        trivy-report.json \
+                                        ${BUILD_NUMBER} \
+                                        "${IMAGE_NAME}:${BUILD_NUMBER}" || true
                                 """
                                 env.STAGE_TRIVY = 'SUCCESS'
                             } catch(e) {
@@ -361,6 +371,13 @@ EOF
                         ).trim()
 
                         echo "ZAP Results — High: ${high} | Medium: ${med} | Low: ${low}"
+                        // Ship ZAP results to KEEP
+                        sh """
+                            echo "Shipping ZAP results to KEEP..."
+                            /usr/local/bin/zap-shipper.sh \
+                                /tmp/zap-reports/zap-alerts.json \
+                                ${BUILD_NUMBER} \
+                                "${appUrl}" || true """
                         env.STAGE_ZAP = "SUCCESS (High:${high} Med:${med} Low:${low})"
 
                     } catch(e) {
@@ -434,6 +451,7 @@ EOF
                 def overallIcon  = currentBuild.result == 'SUCCESS' ? '✅' :
                                    currentBuild.result == 'FAILURE' ? '❌' :
                                    currentBuild.result == 'UNSTABLE'? '⚠️' : '⛔'
+                
 
                 emailext(
                     subject: "${overallIcon} [${currentBuild.result}] ${env.JOB_NAME} #${env.BUILD_NUMBER}",
