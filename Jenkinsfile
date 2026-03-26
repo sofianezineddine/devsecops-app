@@ -226,15 +226,7 @@ EOF
                                       --skip-java-db-update \
                                       ${IMAGE_NAME}:${BUILD_NUMBER}
 
-
-                                    echo "✅ Trivy scan complete"
-
-                                    # Ship to KEEP
-                                    echo "Shipping Trivy results to KEEP..."
-                                    /usr/local/bin/trivy-shipper.sh \
-                                        trivy-report.json \
-                                        ${BUILD_NUMBER} \
-                                        "${IMAGE_NAME}:${BUILD_NUMBER}" || true
+                
                                 """
                                 env.STAGE_TRIVY = 'SUCCESS'
                             } catch(e) {
@@ -371,13 +363,6 @@ EOF
                         ).trim()
 
                         echo "ZAP Results — High: ${high} | Medium: ${med} | Low: ${low}"
-                        // Ship ZAP results to KEEP
-                        sh """
-                            echo "Shipping ZAP results to KEEP..."
-                            /usr/local/bin/zap-shipper.sh \
-                                /tmp/zap-reports/zap-alerts.json \
-                                ${BUILD_NUMBER} \
-                                "${appUrl}" || true """
                         env.STAGE_ZAP = "SUCCESS (High:${high} Med:${med} Low:${low})"
 
                     } catch(e) {
@@ -400,6 +385,103 @@ EOF
                 ])
             }
         }
+        stage('Ship Alerts to KEEP') {
+            steps {
+                script {
+                    try {
+                        // Get KEEP auth token
+                        def keepToken = sh(
+                            script: """
+                                curl -s -X POST http://192.168.237.148:8085/signin \\
+                                    -H "Content-Type: application/json" \\
+                                    -d '{"username":"keep","password":"keep"}' | \\
+                                    python3 -c "import sys,json; print(json.load(sys.stdin).get('accessToken',''))"
+                            """,
+                            returnStdout: true
+                        ).trim()
+
+                        if (!keepToken) {
+                            echo "WARN: Could not get KEEP token, skipping"
+                            env.STAGE_KEEP = 'SKIPPED (no token)'
+                            return
+                        }
+
+                        // Ship Trivy alerts
+                        if (fileExists('trivy-report.json')) {
+                            sh """
+                                KEEP_TOKEN='${keepToken}' python3 -c '
+import json, os, urllib.request
+TOKEN = os.environ["KEEP_TOKEN"]
+API = "http://192.168.237.148:8085"
+with open("trivy-report.json") as f:
+    report = json.load(f)
+image = report.get("ArtifactName", "unknown")
+sev_map = {"CRITICAL":"critical","HIGH":"high","MEDIUM":"warning"}
+seen, sent = set(), 0
+for r in report.get("Results", []):
+    for v in r.get("Vulnerabilities", []):
+        cve = v.get("VulnerabilityID","")
+        sev = v.get("Severity","")
+        pkg = v.get("PkgName","")
+        if cve in seen or sev not in sev_map: continue
+        seen.add(cve)
+        a = {"name":f"[Trivy] {cve} in {pkg}","source":["trivy"],
+             "severity":sev_map[sev],"fingerprint":f"trivy_{cve}_{pkg}",
+             "description":f"{v.get(chr(84)+chr(105)+chr(116)+chr(108)+chr(101),chr(78)+chr(47)+chr(65))[:120]} | {pkg}@{v.get(chr(73)+chr(110)+chr(115)+chr(116)+chr(97)+chr(108)+chr(108)+chr(101)+chr(100)+chr(86)+chr(101)+chr(114)+chr(115)+chr(105)+chr(111)+chr(110),chr(63))} | {image}",
+             "environment":"production","service":image,
+             "labels":{"cve":cve,"package":pkg,"severity":sev,"source_tool":"trivy"}}
+        try:
+            req = urllib.request.Request(f"{API}/alerts/event",
+                data=json.dumps(a).encode(),
+                headers={"Authorization":f"Bearer {TOKEN}","Content-Type":"application/json"},method="POST")
+            urllib.request.urlopen(req); sent += 1
+        except: pass
+print(f"[Trivy] Sent {sent}/{len(seen)} CVEs to KEEP")
+'
+                            """
+                        }
+
+                        // Ship ZAP alerts
+                        if (fileExists('zap-alerts.json')) {
+                            sh """
+                                KEEP_TOKEN='${keepToken}' python3 -c '
+import json, os, urllib.request
+TOKEN = os.environ["KEEP_TOKEN"]
+API = "http://192.168.237.148:8085"
+with open("zap-alerts.json") as f:
+    data = json.load(f)
+sev_map = {"High":"critical","Medium":"high","Low":"warning"}
+seen, sent = set(), 0
+for a in data.get("alerts",[]):
+    name = a.get("name",a.get("alert",""))
+    risk = a.get("risk","")
+    fp = f"zap_{a.get(chr(112)+chr(108)+chr(117)+chr(103)+chr(105)+chr(110)+chr(73)+chr(100),chr(63))}_{name}"
+    if fp in seen or risk not in sev_map: continue
+    seen.add(fp)
+    alert = {"name":f"[ZAP] {name}","source":["zap"],"severity":sev_map[risk],
+             "description":f"{a.get(chr(100)+chr(101)+chr(115)+chr(99)+chr(114)+chr(105)+chr(112)+chr(116)+chr(105)+chr(111)+chr(110),chr(63))[:150]} | URL: {a.get(chr(117)+chr(114)+chr(108),chr(63))}",
+             "fingerprint":fp,"environment":"production","service":"my-app",
+             "labels":{"risk":risk,"source_tool":"zap"}}
+    try:
+        req = urllib.request.Request(f"{API}/alerts/event",
+            data=json.dumps(alert).encode(),
+            headers={"Authorization":f"Bearer {TOKEN}","Content-Type":"application/json"},method="POST")
+        urllib.request.urlopen(req); sent += 1
+    except: pass
+print(f"[ZAP] Sent {sent}/{len(seen)} alerts to KEEP")
+'
+                            """
+                        }
+
+                        env.STAGE_KEEP = 'SUCCESS'
+                    } catch(e) {
+                        env.STAGE_KEEP = "FAILED: ${e.message?.take(100)}"
+                        // Non-blocking: don't throw
+                    }
+                }
+            }
+        }
+
     }
 
     post {
@@ -415,7 +497,8 @@ EOF
                     ['Trivy Image Scan',     env.STAGE_TRIVY    ?: 'SKIPPED'],
                     ['Render K8s Manifest',  env.STAGE_MANIFEST ?: 'SKIPPED'],
                     ['Deploy to Kubernetes', env.STAGE_K8S      ?: 'SKIPPED'],
-                    ['OWASP ZAP DAST Scan',  env.STAGE_ZAP      ?: 'SKIPPED']
+                    ['OWASP ZAP DAST Scan',  env.STAGE_ZAP      ?: 'SKIPPED'],
+                    ['Ship to KEEP',         env.STAGE_KEEP     ?: 'SKIPPED']
                 ]
 
                 def stageRows = ''
